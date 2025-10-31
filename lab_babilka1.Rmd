@@ -268,34 +268,95 @@ Assume that a medical laboratory receives $n$ samples of radioactive element ${{
     -   calculate the number of elements of the sample which are less than critical value ($8 \times 10^8$) and calculate the empirical probability; comment whether it is close to the desired level $0.95$
 
 ```{r}
-lambda <- 1  # change this!
-N <- 100     # change this!
+T <- 30.1*365*24*3600
+lambda <- log(2) / T 
+
+m <- id * 1e-6
+Na <- 6 * 1e23
+M <- 137
+N <- (m / M) * Na
 mu <- N * lambda
+sigma <- sqrt(mu)
 K <- 1e3
-n <- 5
-sample_means <- colMeans(matrix(rpois(n*K, lambda = mu), nrow=n))
+
+nVals <- c(5,10,50)
 ```
 
 #### Next, calculate the parameters of the standard normal approximation
 
 ```{r}
-mu <- 0       # change this!
-sigma <- 1    # change this!
+muNormal <- mu
 ```
 
 #### We can now plot ecdf and cdf
 
 ```{r}
-xlims <- c(mu-3*sigma,mu+3*sigma)
-Fs <- ecdf(sample_means)
-plot(Fs, 
+for (n in nVals) {
+  sigmaNormal <- sqrt(mu/n)
+  
+  sample_means <- colMeans(matrix(rpois(n*K, lambda = mu), nrow=n)) 
+
+
+  xlims <- c(muNormal-3*sigmaNormal,muNormal+3*sigmaNormal) 
+  Fs <- ecdf(sample_means)
+  
+
+  
+xVals <- seq(muNormal - 3*sigmaNormal, muNormal + 3*sigmaNormal, length.out = 0.5*n*K)
+
+normVals <- pnorm(xVals, mean = muNormal, sd = sigmaNormal)
+maxDiff <- max(abs(Fs(xVals) - normVals))
+
+
+
+#plotting ecdf
+  plot(Fs, 
      xlim = xlims, 
      ylim = c(0,1),
      col = "blue",
      lwd = 2,
-     main = "Comparison of ecdf and cdf")
-curve(pnorm(x, mean = mu, sd = sigma), col = "red", lwd = 2, add = TRUE)
+     main = paste("Comparison of ecdf and cdf, n:", n, "; Max difference: ", maxDiff))
+#plotting cdf
+curve(pnorm(x, mean = muNormal, sd = sigmaNormal), col = "red", lwd = 2, add = TRUE)
+legend("bottomright",
+       legend = c("ecdf", "cdf"),
+       col = c("blue", "red"),
+       lwd = 2)
+}
+
 ```
+
+all parameters of distributions are enormous in comparison to \*\*n\*\*s so the difference between n = 5 and n = 50 is almost invisible, although we can observe that n = 50 is slightly more "in-line" with normal distribution. With smaller values the difference would've been more visible.
+
+```{r}
+a <- 8e8
+nMarkov <- a * 0.05 / mu
+
+chernoff_fun <- function(s) (log(0.05) + s * a) / (mu * (exp(s) - 1))
+bestS <- optimize(chernoff_fun, interval = c(1e-6, 1), maximum = TRUE)$maximum
+nChernoff <- chernoff_fun(bestS)
+
+z <- qnorm(0.95)
+x1 <- (-z + sqrt(z^2 + 4 * a)) / 2
+nCLT <- (x1^2) / mu
+
+newNs <- c(ceiling(nMarkov), floor(nChernoff), floor(nCLT), 10)
+
+cat("nMarkov =", ceiling(nMarkov), 
+    "\nnChernoff =", floor(nChernoff), 
+    "\nnCLT =", floor(nCLT), "\n\n")
+
+for (n in newNs) {
+  sums <- rpois(K, lambda = n * mu)
+  empProb <- mean(sums <= a)
+  
+  cat("n =", n, 
+      "\nEmpirical P(Sum <= a):", empProb, 
+}
+
+```
+
+Reason for this kind of result is very small standard deviation, basically every sum is very close to mu, and a is above mu, so all sums are smaller than our critical value so empirical probability is 1, pretty close to 0.95. Last value I put in the newNs is slightly bigger than CLT n, and with that all sums exceed a and empirical probability = 0. Again the reason of it is small sd and truly largest possible n, if sd was bigger then it would've been possible that still some sums will be less that our critical value.
 
 **Next, proceed with all the remaining steps**
 
@@ -781,4 +842,24 @@ curve(pnorm(x, mean = mu, sd = sigma), col = "red", lwd = 2, add = TRUE)
 
 ### General summary and conclusions
 
-Summarize here what you've done, whether you solved the tasks, what difficulties you had etc.
+Task 1
+The main goal was to estimate the probability of correct transmission.
+Using definitions from topic 9, we completed the subtask. 
+From the results, the estimated 𝑝^appears slightly overestimated for
+higher probability values. We applied the CLT because we
+needed the normal CDF in the inequality to find the confidence interval. 
+After determining the minimum 𝑁=549 we solved task 3 using the inverse relationship between 𝜀 and 𝑁
+In the final part, we observed that errors of 0 and 2 occurred most frequently.
+Task 2
+Here we used CLT again, but not just to show the distribution gets close to
+normal at large n. We also used Chernoff's and
+Markov's inequalities to find the upper bound on atom numbers in a sample. 
+We plotted the ecdf of sample means and saw it's very close to the normal cdf.
+
+Task 3
+We used CLT to show that X1,X2,…,XnX_1, X_2,\dots,X_n
+X1​,X2​,…,Xn​ gets close to a normal distribution.
+
+Task 4
+We looked at independence of random variables and their expectation and variance. We showed by simulation that E(1X)≠1E(X)\mathbb{E}(\frac{1}{X}) \neq \frac{1}{\mathbb{E}(X)}
+E(X1​)=E(X)1​. We also found that X is binomial distributed and calculated theoretical and sample values for expectations and variances. They matched pretty well.
