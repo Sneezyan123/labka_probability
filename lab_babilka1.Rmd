@@ -267,96 +267,99 @@ Assume that a medical laboratory receives $n$ samples of radioactive element ${{
     -   repeat this $K$ times to get the sample $\mathbf{s}=(s_1,\dots,s_K)$ of sums;
     -   calculate the number of elements of the sample which are less than critical value ($8 \times 10^8$) and calculate the empirical probability; comment whether it is close to the desired level $0.95$
 
-```{r}
-T <- 30.1*365*24*3600
-lambda <- log(2) / T 
 
+```{r}
+set.seed(id)
+
+T <- 30.1 * 365 * 24 * 3600
+lambda <- log(2) / T
 m <- id * 1e-6
-Na <- 6 * 1e23
+Na <- 6e23
 M <- 137
-N <- (m / M) * Na
-mu <- N * lambda
-sigma <- sqrt(mu)
-K <- 1e3
+N_atoms <- (m / M) * Na
+mu <- N_atoms * lambda
 
-nVals <- c(5,10,50)
-```
+K <- 1000
+nVals <- c(5, 10, 50)
 
-#### Next, calculate the parameters of the standard normal approximation
-
-```{r}
-muNormal <- mu
-```
-
-#### We can now plot ecdf and cdf
-
-```{r}
+par(mfrow = c(1, length(nVals)))
 for (n in nVals) {
-  sigmaNormal <- sqrt(mu/n)
-  
-  sample_means <- colMeans(matrix(rpois(n*K, lambda = mu), nrow=n)) 
-
-
-  xlims <- c(muNormal-3*sigmaNormal,muNormal+3*sigmaNormal) 
+  mu_mean <- mu
+  sd_mean <- sqrt(mu / n)
+  sims_mat <- matrix(rpois(n * K, lambda = mu), nrow = n, ncol = K)
+  sample_means <- colMeans(sims_mat)
+  xVals <- seq(mu_mean - 4 * sd_mean, mu_mean + 4 * sd_mean, length.out = 1000)
   Fs <- ecdf(sample_means)
-  
-
-  
-xVals <- seq(muNormal - 3*sigmaNormal, muNormal + 3*sigmaNormal, length.out = 0.5*n*K)
-
-normVals <- pnorm(xVals, mean = muNormal, sd = sigmaNormal)
-maxDiff <- max(abs(Fs(xVals) - normVals))
-
-
-
-#plotting ecdf
-  plot(Fs, 
-     xlim = xlims, 
-     ylim = c(0,1),
-     col = "blue",
-     lwd = 2,
-     main = paste("Comparison of ecdf and cdf, n:", n, "; Max difference: ", maxDiff))
-#plotting cdf
-curve(pnorm(x, mean = muNormal, sd = sigmaNormal), col = "red", lwd = 2, add = TRUE)
-legend("bottomright",
-       legend = c("ecdf", "cdf"),
-       col = c("blue", "red"),
-       lwd = 2)
+  ecdf_vals <- Fs(xVals)
+  normal_cdf_vals <- pnorm(xVals, mean = mu_mean, sd = sd_mean)
+  maxDiff <- max(abs(ecdf_vals - normal_cdf_vals))
+  plot(xVals, ecdf_vals, type = "s", lwd = 2, col = "blue",
+       main = paste0("n = ", n, "  (max |F_emp - F_norm| = ", signif(maxDiff, 3), ")"),
+       xlab = "sample mean", ylab = "CDF", ylim = c(0, 1))
+  lines(xVals, normal_cdf_vals, col = "red", lwd = 2)
+  legend("bottomright", legend = c("Empirical CDF", "Normal CDF"),
+         col = c("blue", "red"), lwd = 2)
+  cat("n =", n, " max CDF diff =", signif(maxDiff, 6), "\n")
 }
+par(mfrow = c(1, 1))
 
-```
-
-all parameters of distributions are enormous in comparison to \*\*n\*\*s so the difference between n = 5 and n = 50 is almost invisible, although we can observe that n = 50 is slightly more "in-line" with normal distribution. With smaller values the difference would've been more visible.
-
-```{r}
 a <- 8e8
-nMarkov <- a * 0.05 / mu
+target_prob <- 0.95
+alpha <- 1 - target_prob
 
-chernoff_fun <- function(s) (log(0.05) + s * a) / (mu * (exp(s) - 1))
-bestS <- optimize(chernoff_fun, interval = c(1e-6, 1), maximum = TRUE)$maximum
-nChernoff <- chernoff_fun(bestS)
+nMarkov <- floor(alpha * a / mu)
+cat("\nMarkov bound (integer): n <= ", nMarkov, "\n")
 
-z <- qnorm(0.95)
-x1 <- (-z + sqrt(z^2 + 4 * a)) / 2
-nCLT <- (x1^2) / mu
+z <- qnorm(target_prob)
+y <- (-z + sqrt(z^2 + 4 * a)) / 2
+nCLT <- floor((y^2) / mu)
+cat("CLT approximation (integer): n <= ", nCLT, "\n")
 
-newNs <- c(ceiling(nMarkov), floor(nChernoff), floor(nCLT), 10)
-
-cat("nMarkov =", ceiling(nMarkov), 
-    "\nnChernoff =", floor(nChernoff), 
-    "\nnCLT =", floor(nCLT), "\n\n")
-
-for (n in newNs) {
-  sums <- rpois(K, lambda = n * mu)
-  empProb <- mean(sums <= a)
-  
-  cat("n =", n, 
-      "\nEmpirical P(Sum <= a):", empProb, 
+chernoff_check_for_n <- function(n, s_upper = 20) {
+  f <- function(s) { -s * a + n * mu * (exp(s) - 1) }
+  opt <- optimize(f, interval = c(1e-12, s_upper), tol = 1e-12)
+  mmin <- opt$objective
+  bound <- exp(mmin)
+  return(list(bound = bound, mmin = mmin, s_opt = opt$minimum))
 }
 
-```
+n_chernoff_max <- 0
+n_try <- 1
+max_n_limit <- 1e5
+while (n_try <= max_n_limit) {
+  res_c <- chernoff_check_for_n(n_try)
+  if (res_c$bound <= alpha) {
+    n_chernoff_max <- n_try
+    n_try <- n_try + 1
+  } else {
+    break
+  }
+}
+if (n_chernoff_max == 0) {
+  cat("Chernoff: no n >=1 satisfies bound <= 0.05\n")
+} else {
+  cat("Chernoff bound (integer): n <= ", n_chernoff_max, "\n")
+}
 
-Reason for this kind of result is very small standard deviation, basically every sum is very close to mu, and a is above mu, so all sums are smaller than our critical value so empirical probability is 1, pretty close to 0.95. Last value I put in the newNs is slightly bigger than CLT n, and with that all sums exceed a and empirical probability = 0. Again the reason of it is small sd and truly largest possible n, if sd was bigger then it would've been possible that still some sums will be less that our critical value.
+K_emp <- 5000
+set.seed(id + 1)
+candidates <- unique(c(max(1, nMarkov), n_chernoff_max, nCLT))
+cat("\nCandidate n values for empirical check:", paste(candidates, collapse = ", "), "\n")
+
+for (n in candidates) {
+  sums <- rpois(K_emp, lambda = n * mu)
+  empProb <- mean(sums <= a)
+  cat("n =", n, " Empirical P(S_n <= a) =", signif(empProb, 6), "\n")
+}
+
+chosen_n <- nCLT
+sums_chosen <- rpois(K_emp, lambda = chosen_n * mu)
+hist(sums_chosen, breaks = 80, main = paste("Histogram of S_n with n =", chosen_n),
+     xlab = "S_n", xlim = c(min(sums_chosen), min(max(sums_chosen), a * 1.1)))
+abline(v = a, col = "red", lwd = 2, lty = 2)
+
+
+```
 
 **Next, proceed with all the remaining steps**
 
